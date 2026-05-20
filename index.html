@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minesweeper RL — SARSA(λ) + Dual Exploration</title>
+  <style>
+    :root {
+      --bg-deep:     #060b14;
+      --bg-primary:  #0b1120;
+      --bg-card:     #111827;
+      --bg-elevated: #182230;
+      --bg-tinted:   #0e1926;
+      --border-s: rgba(255,255,255,0.06);
+      --border-m: rgba(255,255,255,0.11);
+      --border-a: rgba(255,255,255,0.22);
+      --text-1: #e8ecf2;
+      --text-2: #a1aab8;
+      --text-3: #6b7280;
+      --accent:      #14b8a6;
+      --accent-glow: rgba(20,184,166,0.2);
+      --accent-2:    #8b5cf6;
+      --accent-3:    #f59e0b;
+      --accent-4:    #3b82f6;
+      --font-s: 'Inter','SF Pro Display','PingFang SC',system-ui,sans-serif;
+      --font-m: 'SF Mono','Cascadia Code','JetBrains Mono',monospace;
+      --r-sm:6px;--r-md:12px;--r-lg:18px;
+      --shadow-card:0 1px 3px rgba(0,0,0,.5),0 4px 20px rgba(0,0,0,.3);
+      --t-fast:0.15s ease;--t-smooth:0.3s cubic-bezier(.4,0,.2,1);
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth;font-size:16px}
+    body{font-family:var(--font-s);background:var(--bg-deep);color:var(--text-1);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+    img{display:block;max-width:100%}
+    a{text-decoration:none}
+    h1,h2,h3,h4,p{margin:0}
+    #particle-canvas{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.3}
+
+    /* HEADER */
+    .site-header{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:62px;padding:0 clamp(16px,5vw,72px);background:rgba(6,11,20,.88);border-bottom:1px solid var(--border-s);backdrop-filter:blur(18px)}
+    .header-brand{display:flex;align-items:center;gap:9px;font-size:.95rem;font-weight:800;letter-spacing:-.01em;color:var(--text-1)}
+    .site-header nav{display:flex;align-items:center;gap:clamp(6px,2vw,22px)}
+    .site-header nav a{color:var(--text-3);font-size:.85rem;font-weight:600;transition:color var(--t-fast);padding:4px 0}
+    .site-header nav a:hover,.site-header nav a.active{color:var(--accent)}
+    .header-ext{display:flex;gap:8px;align-items:center;flex-shrink:0}
+    .ext-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border:1px solid var(--border-m);border-radius:999px;background:var(--bg-elevated);color:var(--text-2);font-size:.76rem;font-weight:600;transition:all var(--t-fast)}
+    .ext-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+    /* HERO */
+    .hero{position:relative;isolation:isolate;overflow:hidden;min-height:calc(95vh - 62px);display:flex;align-items:flex-end;padding:clamp(36px,8vw,100px);background:#05090c}
+    #game-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.45}
+    .hero::before{content:'';position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(6,11,20,.85),rgba(6,11,20,.5) 55%,rgba(6,11,20,.15)),linear-gradient(180deg,rgba(6,11,20,0) 25%,rgba(6,11,20,.75))}
+    .hero-copy{position:relative;z-index:2;max-width:860px;text-shadow:0 2px 24px rgba(0,0,0,.6)}
+    .eyebrow{margin-bottom:14px;color:var(--accent);font-size:.78rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+    .hero h1{font-size:clamp(50px,10vw,110px);line-height:.93;letter-spacing:-.025em;color:#fff}
+    .hero .tagline{max-width:620px;margin-top:20px;font-size:clamp(16px,2vw,22px);line-height:1.45;color:rgba(255,255,255,.82);font-weight:400}
+    .hero-badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
+    .hero-badge{display:inline-flex;align-items:center;min-height:34px;padding:0 13px;border:1px solid rgba(255,255,255,.26);border-radius:999px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.88);font-size:.8rem;font-weight:700;backdrop-filter:blur(4px)}
+    .hero-badge.hi{border-color:var(--accent);color:var(--accent);background:rgba(20,184,166,.12)}
+    .hero-links{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+    .hero-link{display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:0 20px;border-radius:999px;font-size:.86rem;font-weight:700;transition:all var(--t-smooth)}
+    .hero-link.primary{background:var(--accent);color:#fff}
+    .hero-link.primary:hover{opacity:.88;transform:translateY(-1px)}
+    .hero-link.secondary{border:1.5px solid rgba(255,255,255,.32);color:rgba(255,255,255,.88);background:rgba(255,255,255,.08)}
+    .hero-link.secondary:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.14)}
+
+    /* SHARED SECTION */
+    .section{position:relative;z-index:1;padding:clamp(52px,8vw,90px) clamp(16px,6vw,88px)}
+    .section.tinted{background:var(--bg-tinted)}
+    .section-heading{display:grid;grid-template-columns:minmax(160px,.44fr) minmax(0,1fr);gap:32px;align-items:start;margin-bottom:38px}
+    .kicker{margin-bottom:10px;color:var(--accent);font-size:.72rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+    h2{font-size:clamp(26px,5vw,50px);line-height:1.06;letter-spacing:-.02em;color:var(--text-1)}
+    h3{font-size:1.05rem;line-height:1.3;letter-spacing:-.01em;color:var(--text-1);margin-bottom:8px}
+    p{max-width:740px;color:var(--text-2);line-height:1.72;font-size:.93rem}
+
+    /* ABSTRACT */
+    .abstract-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
+
+    /* STAT PILLS (hero area) */
+    .stat-row{display:flex;gap:24px;flex-wrap:wrap;margin-top:28px}
+    .stat-item{text-align:center}
+    .stat-val{display:block;font-size:2.4rem;font-weight:900;color:var(--accent);letter-spacing:-.03em;line-height:1}
+    .stat-lbl{display:block;font-size:.7rem;color:var(--text-2);font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-top:4px}
+
+    /* PIPELINE / METHOD */
+    .pipeline-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+    .pipeline-step{padding:22px;border:1px solid var(--border-m);border-radius:var(--r-md);background:var(--bg-card);min-height:220px}
+    .step-num{display:inline-block;margin-bottom:38px;color:var(--accent);font-size:.7rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+    .method-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .method-split-item{padding:26px;border:1px solid rgba(20,184,166,.18);border-radius:var(--r-md);background:var(--bg-elevated)}
+
+    /* CODE SNIPPET */
+    .code-block{background:#0a1628;border:1px solid var(--border-m);border-radius:var(--r-md);padding:16px 20px;font-family:var(--font-m);font-size:.78rem;color:#a5f3fc;line-height:1.7;overflow-x:auto;margin-top:12px}
+    .code-block .cm{color:#4b5563}
+    .code-block .kw{color:#f472b6}
+    .code-block .nm{color:#34d399}
+    .code-block .nu{color:#fb923c}
+
+    /* REWARD TABLE */
+    .reward-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:16px}
+    .reward-card{padding:18px;border-radius:var(--r-md);border:1px solid var(--border-m);background:var(--bg-card);text-align:center}
+    .reward-val{font-size:1.6rem;font-weight:900;font-family:var(--font-m);margin-bottom:6px}
+    .reward-val.pos{color:#34d399}
+    .reward-val.neg{color:#f87171}
+    .reward-val.neu{color:var(--accent-3)}
+    .reward-label{font-size:.72rem;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em}
+    .reward-desc{font-size:.75rem;color:var(--text-3);margin-top:4px;max-width:none}
+
+    /* FEATURE GRID */
+    .feature-table{width:100%;border-collapse:collapse;margin-top:16px}
+    .feature-table th,.feature-table td{padding:10px 14px;border-bottom:1px solid var(--border-s);font-size:.83rem;text-align:left;vertical-align:top}
+    .feature-table th{background:var(--bg-elevated);color:var(--text-3);font-size:.68rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em}
+    .feature-table td{color:var(--text-2)}
+    .feature-table tr:last-child td{border-bottom:none}
+    .feature-table tbody tr:hover td{background:var(--bg-elevated)}
+    .badge-f{display:inline-flex;align-items:center;min-width:32px;padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:900;font-family:var(--font-m)}
+    .badge-f.stat{background:rgba(59,130,246,.15);color:#60a5fa}
+    .badge-f.inf{background:rgba(20,184,166,.15);color:var(--accent)}
+
+    /* ARCHITECTURE */
+    .arch-container{border:1px solid var(--border-m);border-radius:var(--r-lg);padding:28px;background:var(--bg-card);overflow:auto;margin-bottom:18px}
+    .arch-components{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    .arch-component{padding:20px;border:1px solid var(--border-m);border-radius:var(--r-md);background:var(--bg-elevated);position:relative;overflow:hidden}
+    .arch-component::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent)}
+    .arch-component.c2::before{background:var(--accent-2)}
+    .arch-component.c3::before{background:var(--accent-3)}
+    .arch-label{font-size:.68rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin-bottom:8px}
+    .arch-label.c2{color:var(--accent-2)}
+    .arch-label.c3{color:var(--accent-3)}
+    .chip-row{display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-top:12px}
+    .chip{padding:4px 10px;border-radius:var(--r-sm);border:1px solid var(--border-m);background:var(--bg-elevated);font-size:.7rem;font-weight:700;color:var(--accent)}
+    .chip-arrow{color:var(--text-3);font-size:.9rem;padding:0 3px}
+    @keyframes dash-flow{to{stroke-dashoffset:-20}}
+    .flow-line{stroke-dasharray:6 4;animation:dash-flow 1.2s linear infinite}
+
+    /* EXPLORATION section */
+    .eps-design-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:24px}
+    .eps-card{padding:24px;border-radius:var(--r-md);border:1px solid var(--border-m);background:var(--bg-card)}
+    .eps-card.best{border-color:var(--accent);background:rgba(20,184,166,.05)}
+    .eps-card-title{font-size:.75rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:8px}
+    .eps-formula{font-family:var(--font-m);font-size:.82rem;color:var(--accent-3);padding:8px 12px;background:rgba(245,158,11,.08);border-radius:var(--r-sm);margin:8px 0;border-left:3px solid var(--accent-3)}
+    .eps-win-rate{font-size:2rem;font-weight:900;letter-spacing:-.02em;color:var(--text-1)}
+    .eps-win-rate span{font-size:.8rem;font-weight:500;color:var(--text-3);margin-left:4px}
+    .eps-card.best .eps-win-rate{color:var(--accent)}
+    .eps-chart-wrap{border:1px solid var(--border-m);border-radius:var(--r-lg);background:var(--bg-card);padding:24px;margin-bottom:18px;overflow-x:auto}
+    .eps-chart-title{font-size:.72rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);margin-bottom:16px}
+
+    /* EXPERIMENTS */
+    .protocol-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;border:1px solid var(--border-m);border-radius:var(--r-md);background:var(--border-m);overflow:hidden;margin-bottom:24px}
+    .protocol-item{padding:20px;background:var(--bg-card)}
+    .protocol-key{display:block;font-size:.68rem;font-weight:900;text-transform:uppercase;letter-spacing:.09em;color:var(--accent);margin-bottom:8px}
+    .protocol-val{display:block;font-size:.95rem;font-weight:700;color:var(--text-1);line-height:1.4}
+    .table-wrap{border:1px solid var(--border-m);border-radius:var(--r-md);background:var(--bg-card);overflow-x:auto;margin-bottom:18px}
+    table{border-collapse:collapse;width:100%;min-width:480px}
+    th,td{padding:11px 15px;border-bottom:1px solid var(--border-s);text-align:left;vertical-align:top;font-size:.84rem}
+    th{color:var(--text-3);font-size:.7rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em;background:var(--bg-elevated)}
+    td{color:var(--text-2)}
+    tr:last-child td{border-bottom:none}
+    tbody tr:hover td{background:var(--bg-elevated)}
+    td.hi{color:var(--accent);font-weight:700}
+    .table-section-label{padding:8px 15px;font-size:.68rem;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);background:rgba(255,255,255,.03);border-bottom:1px solid var(--border-s)}
+
+    /* IMAGE GALLERY */
+    .img-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .img-card{border:1px solid var(--border-m);border-radius:var(--r-lg);background:var(--bg-card);overflow:hidden}
+    .img-card-head{padding:14px 18px;border-bottom:1px solid var(--border-s)}
+    .img-card-head h3{margin:0;font-size:.9rem}
+    .img-card img{width:100%;display:block;background:#0a1628}
+    .img-card.full{grid-column:1/-1}
+
+    /* TEAM */
+    .team-grid{display:flex;flex-wrap:wrap;gap:14px;justify-content:center}
+    .contributor-card{display:flex;align-items:center;gap:11px;padding:11px 18px 11px 11px;border:1px solid var(--border-m);border-radius:999px;background:var(--bg-elevated);transition:all var(--t-smooth)}
+    .contributor-card:hover{border-color:var(--accent)}
+    .contributor-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.9rem;flex-shrink:0}
+    .contributor-name{font-size:.88rem;font-weight:700;color:var(--text-1)}
+    .contributor-role{font-size:.7rem;color:var(--text-3);margin-top:2px}
+
+    /* FOOTER */
+    .site-footer{padding:26px clamp(16px,6vw,88px);border-top:1px solid var(--border-s);background:var(--bg-primary);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    .footer-text{color:var(--text-3);font-size:.78rem}
+    .footer-links{display:flex;gap:16px}
+    .footer-links a{color:var(--text-3);font-size:.78rem;transition:color var(--t-fast)}
+    .footer-links a:hover{color:var(--accent)}
+
+    /* RESPONSIVE */
+    @media(max-width:980px){
+      .section-heading,.abstract-grid,.method-split,.arch-components,.eps-design-grid,.img-grid,.protocol-strip{grid-template-columns:1fr}
+      .pipeline-grid,.reward-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    }
+    @media(max-width:640px){
+      .site-header{flex-direction:column;min-height:0;padding:14px 16px;gap:10px}
+      .pipeline-grid,.reward-grid{grid-template-columns:1fr}
+      .hero{padding:36px 18px}
+    }
+  </style>
+</head>
+
+<body>
+<canvas id="particle-canvas" aria-hidden="true"></canvas>
+
+<!-- ════ HEADER ════ -->
+<header class="site-header">
+  <a class="header-brand" href="#top">
+    <span>💣</span>
+    <span>Minesweeper RL</span>
+  </a>
+  <nav>
+    <a href="#abstract">Overview</a>
+    <a href="#method">Method</a>
+    <a href="#exploration">Exploration</a>
+    <a href="#experiments">Results</a>
+    <a href="#team">Team</a>
+  </nav>
+  <div class="header-ext">
+    <a href="docs/RL_paper.pdf" class="ext-btn" target="_blank">📄 Paper</a>
+    <a href="https://github.com/Fu-fangteng/AIAA3053_RL_for_Game_Playing" class="ext-btn" target="_blank">💻 Code</a>
+  </div>
+</header>
+
+
+<!-- ════ HERO ════ -->
+<section class="hero" id="top">
+  <canvas id="game-canvas" aria-hidden="true"></canvas>
+  <div class="hero-copy">
+    <p class="eyebrow">Reinforcement Learning · Spring 2025–26</p>
+    <h1>Minesweeper<br>RL</h1>
+    <p class="tagline">SARSA(λ) with logic-inference features and a dual exploration strategy solves Classic 9×9 Minesweeper at <strong style="color:var(--accent)">69.4% win rate</strong> — from 0% random baseline.</p>
+    <div class="hero-badges">
+      <span class="hero-badge hi">69.43% Win Rate</span>
+      <span class="hero-badge">79.48% Conditional</span>
+      <span class="hero-badge">SARSA(λ)</span>
+      <span class="hero-badge">10-dim Features</span>
+      <span class="hero-badge">Decay + Adaptive ε</span>
+    </div>
+    <div class="hero-links">
+      <a href="#experiments" class="hero-link primary">↓ See Results</a>
+      <a href="#method"      class="hero-link secondary">Method</a>
+      <a href="#exploration" class="hero-link secondary">Exploration</a>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════ ABSTRACT ════ -->
+<section class="section" id="abstract">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Overview</p>
+      <h2>Logical reasoning meets reinforcement learning.</h2>
+    </div>
+    <p>Key contributions: (1) inference-augmented feature vector encoding provably safe/mine deductions, (2) shaped reward balancing progress and outcome, (3) dual ε strategy combining cross-episode decay with intra-episode adaptive reduction — together lifting win rate from 0% to 69.4%.</p>
+  </div>
+  <div class="abstract-grid">
+    <p>Classic Minesweeper is partially observable, demands logical deduction, and delivers sparse terminal-dominated rewards — a challenging combination for RL. We formulate it as a tabular MDP and train a SARSA(λ) agent with a hand-crafted 10-dimensional feature vector. The feature design is central to performance: three features (f8–f10) encode real-time constraint-propagation results, letting the linear function approximator leverage logical inferences that would otherwise require a larger network.</p>
+    <p>We run a systematic 2×2 ablation over exploration strategies (cross-episode decay × intra-episode adaptive scaling) and a separate λ sweep. The best configuration — SARSA(λ=0.8) with Decay+Adaptive ε — achieves 69.43% ± 0.41% greedy win rate across 3 seeds on standard 9×9/10-mine difficulty, compared to 0.00% for a random baseline. Conditional on surviving the unavoidable ~12.6% first-click mine deaths, the agent wins 79.48% of games where it has any agency.</p>
+  </div>
+  <div class="stat-row" style="margin-top:36px">
+    <div class="stat-item">
+      <span class="stat-val">69.4%</span>
+      <span class="stat-lbl">Greedy Win Rate</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val">79.5%</span>
+      <span class="stat-lbl">Conditional Win Rate</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val">+66pp</span>
+      <span class="stat-lbl">vs. Random Baseline</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val">20k</span>
+      <span class="stat-lbl">Training Episodes</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-val">10</span>
+      <span class="stat-lbl">Feature Dimensions</span>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════ METHOD ════ -->
+<section class="section tinted" id="method">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Method</p>
+      <h2>Four design choices, measured carefully.</h2>
+    </div>
+    <p>Each component was developed and ablated independently: the environment MDP, the feature representation, the reward shape, and the learning algorithm with exploration.</p>
+  </div>
+
+  <div class="pipeline-grid">
+    <div class="pipeline-step">
+      <span class="step-num">Step 01</span>
+      <h3>Environment Design</h3>
+      <p>Standard 9×9/10-mine grid as a discrete MDP. BFS cascade reveals all connected zero-number cells on a single action, matching the real game and giving the agent dense informational updates per step.</p>
+      <div style="margin-top:12px;font-size:.75rem;color:var(--text-3);font-family:var(--font-m)">
+        state → map[9×9] ∈ {−1, 0…8, 9}<br>
+        action → (row, col) ∈ hidden cells<br>
+        terminal → win | mine hit
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">Step 02</span>
+      <h3>Feature Engineering</h3>
+      <p>10-dimensional φ(s, a) combining local danger statistics (f1–f7) with three logical inference features (f8–f10) derived from single-pass constraint propagation. The inference features are the key differentiator.</p>
+      <div style="margin-top:12px;font-size:.75rem;color:var(--text-3);font-family:var(--font-m)">
+        Q(s, a) = <span style="color:var(--accent)">w</span> · φ(s, a) ∈ ℝ¹⁰
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">Step 03</span>
+      <h3>Reward Shaping</h3>
+      <p>Sparse terminal rewards (+10/−10) supplemented with a small per-cell safe-open bonus (+0.05 × cascade size) to provide a learning signal before episodes conclude. A repeat-click penalty (−0.5) prevents degenerate loops.</p>
+      <div style="margin-top:12px;font-size:.75rem;color:var(--text-3);font-family:var(--font-m)">
+        R ∈ {−10, −0.5, +0.05·N, +10}
+      </div>
+    </div>
+    <div class="pipeline-step">
+      <span class="step-num">Step 04</span>
+      <h3>SARSA(λ) Training</h3>
+      <p>On-policy eligibility traces propagate credit back through the episode. The linear approximator stays interpretable while the λ-weighted trace enables multi-step credit assignment beyond single-step TD.</p>
+      <div style="margin-top:12px;font-size:.75rem;color:var(--text-3);font-family:var(--font-m)">
+        e ← γλe + φ(s,a)<br>
+        w ← w + α·δ·e
+      </div>
+    </div>
+  </div>
+
+  <!-- Reward Design Detail -->
+  <div style="margin-bottom:32px">
+    <h3 style="margin-bottom:6px">Reward Design</h3>
+    <p style="margin-bottom:0">Four distinct reward events balance exploration incentive against outcome quality.</p>
+    <div class="reward-grid">
+      <div class="reward-card">
+        <div class="reward-val pos">+0.05 × N</div>
+        <div class="reward-label">Safe Cascade</div>
+        <div class="reward-desc">Per newly opened cell (BFS). Provides dense signal during play.</div>
+      </div>
+      <div class="reward-card">
+        <div class="reward-val pos">+10.0</div>
+        <div class="reward-label">Win</div>
+        <div class="reward-desc">All non-mine cells revealed. Strong terminal incentive.</div>
+      </div>
+      <div class="reward-card">
+        <div class="reward-val neg">−10.0</div>
+        <div class="reward-label">Mine Hit</div>
+        <div class="reward-desc">Symmetric to win reward, teaching mine avoidance.</div>
+      </div>
+      <div class="reward-card">
+        <div class="reward-val neu">−0.5</div>
+        <div class="reward-label">Repeat Click</div>
+        <div class="reward-desc">Penalty for re-clicking revealed cell. Rare; prevents loops.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature Design Split -->
+  <div class="method-split">
+    <div class="method-split-item">
+      <h3>Statistical Features (f1–f7)</h3>
+      <p style="margin-bottom:12px">Local geometry and global board statistics that capture the spatial context around the candidate cell.</p>
+      <div class="table-wrap" style="margin:0">
+        <table class="feature-table">
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge-f stat">f1</span></td><td>Hidden-neighbor ratio (÷8)</td></tr>
+            <tr><td><span class="badge-f stat">f2</span></td><td>Adjacent number sum (÷64)</td></tr>
+            <tr><td><span class="badge-f stat">f3</span></td><td>Danger estimate: f2 ÷ f1 ÷ 8</td></tr>
+            <tr><td><span class="badge-f stat">f4</span></td><td>Completely isolated (no revealed neighbors)</td></tr>
+            <tr><td><span class="badge-f stat">f5</span></td><td>Global hidden-cell ratio</td></tr>
+            <tr><td><span class="badge-f stat">f6</span></td><td>Global detonated-mine ratio</td></tr>
+            <tr><td><span class="badge-f stat">f7</span></td><td>Bias = 1.0 (linear model intercept)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="method-split-item">
+      <h3>Inference Features (f8–f10) — Key Innovation</h3>
+      <p style="margin-bottom:12px">Single-pass constraint propagation: if a number cell's value equals its hidden-neighbor count, all those neighbors are mines. If it equals its known-mine count, remaining hidden neighbors are safe.</p>
+      <div class="table-wrap" style="margin:0">
+        <table class="feature-table">
+          <thead><tr><th>Feature</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge-f inf">f8</span></td><td>Logically <strong style="color:#34d399">safe</strong>: constraint propagation proves no adjacent mine</td></tr>
+            <tr><td><span class="badge-f inf">f9</span></td><td>Logically a <strong style="color:#f87171">mine</strong>: constraint propagation proves mine present</td></tr>
+            <tr><td><span class="badge-f inf">f10</span></td><td>Max remaining-mine probability from neighboring constraints</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block" style="margin-top:12px">
+<span class="cm"># f8/f9: single-pass deduction</span>
+<span class="kw">if</span> <span class="nm">hidden_count</span> == <span class="nm">cell_number</span>:
+    <span class="cm">  → all hidden neighbors are mines (f9=1)</span>
+<span class="kw">if</span> <span class="nm">known_mines</span> == <span class="nm">cell_number</span>:
+    <span class="cm">  → remaining hidden are safe (f8=1)</span>
+
+<span class="cm"># f10: continuous danger score</span>
+<span class="nm">score</span> = (<span class="nm">remaining_mines</span>) / (<span class="nm">remaining_hidden</span>)
+<span class="nm">f10</span> = <span class="nm">max</span>(<span class="nm">score</span> <span class="kw">for</span> <span class="nm">each neighbor</span>)</div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════ ARCHITECTURE ════ -->
+<section class="section" id="architecture">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">System Architecture</p>
+      <h2>From board state to optimal action.</h2>
+    </div>
+    <p>The agent's decision pipeline: the visible board is converted to per-action feature vectors, the SARSA(λ) model scores each candidate, and ε-greedy exploration selects the final action.</p>
+  </div>
+
+  <div class="arch-container">
+    <svg viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:600px;height:220px">
+      <defs>
+        <marker id="arr-t" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#14b8a6"/></marker>
+        <marker id="arr-p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#8b5cf6"/></marker>
+        <marker id="arr-b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#3b82f6"/></marker>
+        <marker id="arr-y" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/></marker>
+        <filter id="glow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+
+      <!-- Environment -->
+      <rect x="14" y="75" width="118" height="70" rx="10" fill="#182230" stroke="#f59e0b" stroke-width="1.5"/>
+      <text x="73" y="102" text-anchor="middle" fill="#f59e0b" font-size="11" font-family="sans-serif" font-weight="700">🎮 Environment</text>
+      <text x="73" y="118" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">9×9 Minesweeper</text>
+      <text x="73" y="132" text-anchor="middle" fill="#6b7280" font-size="7.5" font-family="monospace">state, reward, done</text>
+
+      <!-- Arrow: Env → Feature -->
+      <line x1="132" y1="110" x2="175" y2="110" stroke="#14b8a6" stroke-width="1.5" marker-end="url(#arr-t)" class="flow-line"/>
+      <text x="154" y="104" text-anchor="middle" fill="#6b7280" font-size="7" font-family="sans-serif">state</text>
+
+      <!-- Feature Extractor -->
+      <rect x="177" y="68" width="140" height="84" rx="10" fill="#182230" stroke="#14b8a6" stroke-width="2" filter="url(#glow)"/>
+      <text x="247" y="96" text-anchor="middle" fill="#e8ecf2" font-size="11" font-family="sans-serif" font-weight="700">⚙️ Feature Extractor</text>
+      <text x="247" y="112" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">φ(s, a) for each valid</text>
+      <text x="247" y="125" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">action a ∈ hidden cells</text>
+      <text x="247" y="141" text-anchor="middle" fill="#14b8a6" font-size="8" font-family="monospace">10-dim vector · f1…f10</text>
+
+      <!-- Arrow: Feature → SARSA -->
+      <line x1="317" y1="110" x2="362" y2="110" stroke="#14b8a6" stroke-width="1.5" marker-end="url(#arr-t)" class="flow-line"/>
+      <text x="340" y="104" text-anchor="middle" fill="#6b7280" font-size="7" font-family="sans-serif">φ(s,a)</text>
+
+      <!-- SARSA Agent -->
+      <rect x="364" y="62" width="155" height="96" rx="10" fill="#182230" stroke="#8b5cf6" stroke-width="2" filter="url(#glow)"/>
+      <text x="441" y="90" text-anchor="middle" fill="#e8ecf2" font-size="11" font-family="sans-serif" font-weight="700">🧠 SARSA(λ) Agent</text>
+      <text x="441" y="107" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">Q(s,a) = w · φ(s,a)</text>
+      <text x="441" y="122" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">δ = r + γQ(s′,a′) − Q(s,a)</text>
+      <text x="441" y="138" text-anchor="middle" fill="#8b5cf6" font-size="8" font-family="monospace">w ← w + α·δ·e</text>
+      <text x="441" y="150" text-anchor="middle" fill="#6b7280" font-size="7.5" font-family="monospace">α=0.01  γ=0.99  λ=0.8</text>
+
+      <!-- Arrow: SARSA → ε-greedy -->
+      <line x1="519" y1="110" x2="562" y2="110" stroke="#8b5cf6" stroke-width="1.5" marker-end="url(#arr-p)" class="flow-line"/>
+      <text x="541" y="104" text-anchor="middle" fill="#6b7280" font-size="7" font-family="sans-serif">Q-values</text>
+
+      <!-- ε-greedy -->
+      <rect x="564" y="75" width="138" height="70" rx="10" fill="#182230" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="633" y="100" text-anchor="middle" fill="#e8ecf2" font-size="11" font-family="sans-serif" font-weight="700">🎲 ε-greedy</text>
+      <text x="633" y="116" text-anchor="middle" fill="#a1aab8" font-size="8.5" font-family="sans-serif">Decay + Adaptive</text>
+      <text x="633" y="130" text-anchor="middle" fill="#3b82f6" font-size="8" font-family="monospace">ε·(1−ratio)²</text>
+
+      <!-- Arrow: ε-greedy → Action -->
+      <line x1="702" y1="110" x2="745" y2="110" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#arr-b)" class="flow-line"/>
+      <text x="724" y="104" text-anchor="middle" fill="#6b7280" font-size="7" font-family="sans-serif">action</text>
+
+      <!-- Action/output -->
+      <rect x="747" y="82" width="72" height="56" rx="8" fill="#182230" stroke="#14b8a6" stroke-width="1.5"/>
+      <text x="783" y="106" text-anchor="middle" fill="#14b8a6" font-size="18" font-family="sans-serif">👆</text>
+      <text x="783" y="124" text-anchor="middle" fill="#14b8a6" font-size="9.5" font-family="sans-serif" font-weight="700">(row, col)</text>
+
+      <!-- Reward feedback: Action → Env -->
+      <path d="M783 138 Q783 185 73 185 Q73 152 73 145" stroke="#f59e0b" stroke-width="1.2" fill="none" marker-end="url(#arr-y)" stroke-dasharray="5 3" class="flow-line"/>
+      <text x="420" y="198" text-anchor="middle" fill="#6b7280" font-size="8" font-family="sans-serif">reward + next state feedback</text>
+    </svg>
+  </div>
+
+  <div class="arch-components">
+    <div class="arch-component">
+      <div class="arch-label">Component 01 — Feature Design</div>
+      <h3>Inference-Augmented Representation</h3>
+      <p>f8/f9 are binary flags from constraint propagation; f10 is a continuous mine-probability estimate. Together they give the linear model a "logical reasoning" shortcut that would otherwise require a deep network.</p>
+      <div class="chip-row">
+        <span class="chip">f1–f7 Statistical</span>
+        <span class="chip-arrow">+</span>
+        <span class="chip">f8–f10 Inference</span>
+      </div>
+    </div>
+    <div class="arch-component c2">
+      <div class="arch-label c2">Component 02 — Learning</div>
+      <h3>On-Policy Eligibility Traces</h3>
+      <p>SARSA(λ) accumulates a trace e over the episode, distributing the TD error back to recently visited (s,a) pairs. λ=0.8 balances multi-step credit without the variance of full Monte Carlo returns.</p>
+      <div class="chip-row">
+        <span class="chip" style="color:var(--accent-2)">SARSA (on-policy)</span>
+        <span class="chip-arrow">→</span>
+        <span class="chip" style="color:var(--accent-2)">Trace λ=0.8</span>
+      </div>
+    </div>
+    <div class="arch-component c3">
+      <div class="arch-label c3">Component 03 — Exploration</div>
+      <h3>Dual ε Strategy</h3>
+      <p>Cross-episode exponential decay (0.3→0.05) reduces exploration as the agent learns. Within each episode, adaptive scaling by (1−opened_ratio)² concentrates exploration at game start when information is least available.</p>
+      <div class="chip-row">
+        <span class="chip" style="color:var(--accent-3)">Decay (inter-ep)</span>
+        <span class="chip-arrow">×</span>
+        <span class="chip" style="color:var(--accent-3)">Adaptive (intra-ep)</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ════ EXPLORATION ════ -->
+<section class="section tinted" id="exploration">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Exploration Mechanism</p>
+      <h2>Dual ε: the key contribution.</h2>
+    </div>
+    <p>Two orthogonal exploration dimensions — cross-episode and intra-episode — correspond to two fundamental RL modes: the agent's interaction with <em>itself</em> (how confident am I?) and with the <em>environment</em> (how much do I know right now?). Combining both yields the best win rate (69.43%) and smallest variance (±0.41%).</p>
+  </div>
+
+  <!-- Conceptual explanation -->
+  <div class="method-split" style="margin-bottom:28px">
+    <div class="method-split-item">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:1.4rem">📈</span>
+        <h3 style="margin:0">Decay ε &nbsp;— Interaction with Self</h3>
+      </div>
+      <p style="max-width:none;font-size:.9rem">
+        The decay schedule reflects the agent's <strong style="color:var(--text-1)">growing competence over training</strong>. Early on, the agent knows almost nothing — random exploration is efficient because any information is useful. As more episodes accumulate, the learned weights become reliable, so the agent should <em>trust itself more</em> and explore less. We implement this as an exponential decay across episodes: ε decays from 0.3 → 0.05 over ≈3 600 episodes and remains constant thereafter.
+      </p>
+      <p style="max-width:none;font-size:.9rem;margin-top:10px">
+        This is an agent asking: <em>"How much do I still have to learn overall?"</em> The answer shrinks monotonically as training progresses. In RL terms, this belongs to the dimension of <strong style="color:var(--accent)">self-interaction</strong> — the agent regulating its own exploration based on its assessed capability.
+      </p>
+      <div class="eps-formula" style="margin-top:14px">ε<sub>base</sub> ← max(0.05, 0.3 × 0.9995<sup>episode</sup>)</div>
+    </div>
+    <div class="method-split-item">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:1.4rem">🌍</span>
+        <h3 style="margin:0">Adaptive ε &nbsp;— Interaction with Environment</h3>
+      </div>
+      <p style="max-width:none;font-size:.9rem">
+        The adaptive schedule reflects the <strong style="color:var(--text-1)">amount of information currently visible</strong> on the board. At the very start of a game, almost all 81 cells are hidden — the agent has little context to make informed decisions, so random exploration costs little and may reveal useful patterns. As more cells are opened through BFS cascade, numbers accumulate and constraint propagation can identify safe/mine cells with certainty. At this point, the model's features (f8–f10) become highly informative and the agent should exploit them.
+      </p>
+      <p style="max-width:none;font-size:.9rem;margin-top:10px">
+        This is the agent asking: <em>"How much does the environment currently tell me?"</em> The answer grows within each game as cells are revealed. In RL terms, this belongs to the dimension of <strong style="color:var(--accent)">environment-interaction</strong> — scaling exploration based on the richness of the observable state.
+      </p>
+      <div class="eps-formula" style="margin-top:14px">ε<sub>eff</sub> = ε<sub>base</sub> × (1 − opened_ratio)² &nbsp;, &nbsp; ratio = revealed / 81</div>
+    </div>
+  </div>
+
+  <!-- RL Theory Note -->
+  <div style="padding:20px 24px;border:1px solid rgba(20,184,166,.2);border-radius:var(--r-md);background:rgba(20,184,166,.04);margin-bottom:28px">
+    <p style="max-width:none;font-size:.88rem;color:var(--text-1)">
+      <strong>Two modes of exploration in RL</strong> — The combination is principled. Decay addresses the standard exploration-exploitation trade-off across an <em>agent's lifetime</em>: it is calibrated to model competence, not to any individual game. Adaptive addresses the same trade-off within a <em>single episode</em>: it is calibrated to per-step observability. Neither mechanism alone can solve both problems — Decay cannot distinguish a fully-revealed board from a fresh one; Adaptive cannot lower its floor as the model matures. Together they form a two-axis control: one axis tracks training progress, the other tracks in-game information.
+    </p>
+  </div>
+
+  <!-- Demo GIFs -->
+  <div style="margin-bottom:32px">
+    <h3 style="margin-bottom:4px;color:var(--text-2);font-size:.75rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em">Live Demo — AI Gameplay</h3>
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:12px">
+      <div class="img-card">
+        <div class="img-card-head">
+          <p class="case-label" style="color:var(--accent)">Greedy Policy (ε = 0)</p>
+          <h3>Full winning game — SARSA(λ) greedy play</h3>
+        </div>
+        <img src="docs/media/demo_win.gif" alt="AI winning a 9×9 Minesweeper game" style="width:100%;display:block;background:#0a1628" loading="lazy">
+        <div style="padding:10px 16px;font-size:.75rem;color:var(--text-3)">Teal outline = logically <strong style="color:var(--accent)">safe</strong> cell (f8=1). Red outline = logically a <strong style="color:#ef4444">mine</strong> (f9=1). Star cursor = agent's chosen action.</div>
+      </div>
+      <div class="img-card">
+        <div class="img-card-head">
+          <p class="case-label" style="color:var(--accent-3)">Exploration Contrast</p>
+          <h3>ε = 0.9 (random) vs ε = 0.0 (greedy) — same board</h3>
+        </div>
+        <img src="docs/media/demo_epsilon.gif" alt="High-epsilon random exploration vs low-epsilon greedy policy" style="width:100%;display:block;background:#0a1628" loading="lazy">
+        <div style="padding:10px 16px;font-size:.75rem;color:var(--text-3)">Left: high ε, many random moves, inconsistent coverage. Right: greedy policy using learned features, systematic reveal pattern.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2×2 Design Grid -->
+  <div class="eps-design-grid">
+    <div class="eps-card">
+      <div class="eps-card-title">Fixed &nbsp;— No decay, no adaptive</div>
+      <div class="eps-formula">ε = 0.1 &nbsp;(constant)</div>
+      <div class="eps-win-rate">56.33%<span>± 6.96</span></div>
+      <p style="margin-top:8px;max-width:none;font-size:.8rem">Neither self-interaction nor environment-interaction is considered. The agent explores at the same rate regardless of its competence or the board's state — highest variance of all strategies (±6.96).</p>
+    </div>
+    <div class="eps-card">
+      <div class="eps-card-title">Decay &nbsp;— Self-interaction only</div>
+      <div class="eps-formula">ε<sub>base</sub> ← max(0.05, ε · 0.9995<sup>ep</sup>)</div>
+      <div class="eps-win-rate">66.47%<span>± 0.80</span></div>
+      <p style="margin-top:8px;max-width:none;font-size:.8rem">Models the agent's growing competence across episodes. The exploration floor drops as training matures — the agent trusts its own weights more over time. Variance drops 8× vs Fixed.</p>
+    </div>
+    <div class="eps-card">
+      <div class="eps-card-title">Adaptive &nbsp;— Environment-interaction only</div>
+      <div class="eps-formula">ε = ε<sub>base</sub> · (1 − opened_ratio)²</div>
+      <div class="eps-win-rate">67.27%<span>± 0.17</span></div>
+      <p style="margin-top:8px;max-width:none;font-size:.8rem">Models the board's information richness within each game. Explores most at the blank start when context is minimal; commits to the model's features as the board fills. Lowest variance of all (±0.17).</p>
+    </div>
+    <div class="eps-card best">
+      <div class="eps-card-title">✦ Decay + Adaptive &nbsp;— Both combined</div>
+      <div class="eps-formula">ε = max(0.05, 0.3·0.9995<sup>ep</sup>) · (1 − ratio)²</div>
+      <div class="eps-win-rate">69.43%<span>± 0.41</span></div>
+      <p style="margin-top:8px;max-width:none;font-size:.8rem">Both axes controlled simultaneously. Cross-episode decay ensures the long-run budget shrinks as the model matures; intra-episode adaptive scaling allocates that budget optimally within each game based on how much the environment reveals.</p>
+    </div>
+  </div>
+
+  <!-- ε Visualizations -->
+  <div class="eps-chart-wrap">
+    <div class="eps-chart-title">Cross-episode ε decay trajectory (base ε over 20 000 training episodes)</div>
+    <svg id="eps-decay-svg" viewBox="0 0 560 200" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:700px;display:block">
+      <!-- Axes -->
+      <line x1="52" y1="18" x2="52" y2="168" stroke="#374151" stroke-width="1"/>
+      <line x1="52" y1="168" x2="536" y2="168" stroke="#374151" stroke-width="1"/>
+      <!-- Y gridlines -->
+      <line x1="52" y1="43" x2="536" y2="43" stroke="#1f2937" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="52" y1="93" x2="536" y2="93" stroke="#1f2937" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="52" y1="143" x2="536" y2="143" stroke="#1f2937" stroke-width="1" stroke-dasharray="4 3"/>
+      <!-- Y labels -->
+      <text x="46" y="47" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.30</text>
+      <text x="46" y="97" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.15</text>
+      <text x="46" y="147" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.05</text>
+      <text x="46" y="172" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.00</text>
+      <!-- X labels -->
+      <text x="52"  y="182" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">0</text>
+      <text x="172" y="182" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">5k</text>
+      <text x="292" y="182" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">10k</text>
+      <text x="412" y="182" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">15k</text>
+      <text x="532" y="182" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">20k</text>
+      <text x="295" y="197" text-anchor="middle" fill="#6b7280" font-size="8" font-family="sans-serif">Training Episode</text>
+      <text x="16" y="95" text-anchor="middle" fill="#6b7280" font-size="8" font-family="sans-serif" transform="rotate(-90,16,95)">ε (base)</text>
+
+      <!-- Fixed line: ε=0.1 → y = 168 - (0.1/0.32)*150 = 168-46.9 = 121 -->
+      <line x1="52" y1="121" x2="536" y2="121" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 3" opacity="0.7"/>
+
+      <!-- Decay line: ε=0.3→0.05, floor at ep≈3584 -->
+      <!-- y_svg = 168 - (ε/0.32)*150 -->
+      <!-- ε=0.3 → y=168-140.6=27.4; ε=0.182→y=168-85.3=82.7; ε=0.11→y=168-51.6=116.4; ε=0.067→y=168-31.4=136.6; ε=0.05→y=168-23.4=144.6 -->
+      <!-- x_svg = 52 + ep * (484/20000) = 52 + ep*0.0242 -->
+      <!-- ep=0→52; ep=1000→76.2; ep=2000→100.4; ep=3000→124.6; ep=3584→138.7; ep=20000→536 -->
+      <polyline points="52,27 76,83 100,116 125,137 139,145 536,145" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- Adaptive base: stays at 0.3 throughout -->
+      <line x1="52" y1="27" x2="536" y2="27" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8 3" opacity="0.8"/>
+
+      <!-- Decay+Adaptive: same base as Decay (shown as Decay with different color) -->
+      <polyline points="52,27 76,83 100,116 125,137 139,145 536,145" fill="none" stroke="#14b8a6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 3"/>
+
+      <!-- Legend -->
+      <line x1="58" y1="12" x2="80" y2="12" stroke="#6b7280" stroke-width="2" stroke-dasharray="6 3"/>
+      <text x="84" y="16" fill="#6b7280" font-size="8.5" font-family="sans-serif">Fixed (0.10)</text>
+      <line x1="148" y1="12" x2="170" y2="12" stroke="#3b82f6" stroke-width="2.5"/>
+      <text x="174" y="16" fill="#3b82f6" font-size="8.5" font-family="sans-serif">Decay</text>
+      <line x1="222" y1="12" x2="244" y2="12" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8 3"/>
+      <text x="248" y="16" fill="#f59e0b" font-size="8.5" font-family="sans-serif">Adaptive (base=0.30)</text>
+      <line x1="378" y1="12" x2="400" y2="12" stroke="#14b8a6" stroke-width="2.5" stroke-dasharray="10 3"/>
+      <text x="404" y="16" fill="#14b8a6" font-size="8.5" font-family="sans-serif">Decay+Adaptive</text>
+
+      <!-- Floor annotation -->
+      <text x="141" y="157" fill="#6b7280" font-size="7.5" font-family="sans-serif">← floor at ep≈3584</text>
+    </svg>
+  </div>
+
+  <div class="eps-chart-wrap">
+    <div class="eps-chart-title">Within-episode adaptive scaling: ε<sub>eff</sub> = ε<sub>base</sub> × (1 − opened_ratio)² — exploits more as the board fills</div>
+    <svg viewBox="0 0 560 180" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:700px;display:block">
+      <line x1="52" y1="18" x2="52" y2="155" stroke="#374151" stroke-width="1"/>
+      <line x1="52" y1="155" x2="536" y2="155" stroke="#374151" stroke-width="1"/>
+      <line x1="52" y1="43" x2="536" y2="43" stroke="#1f2937" stroke-width="1" stroke-dasharray="4 3"/>
+      <line x1="52" y1="93" x2="536" y2="93" stroke="#1f2937" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="46" y="22" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">1.0</text>
+      <text x="46" y="47" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.75</text>
+      <text x="46" y="97" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.25</text>
+      <text x="46" y="159" text-anchor="end" fill="#6b7280" font-size="9" font-family="monospace">0.00</text>
+      <text x="52" y="168" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">0%</text>
+      <text x="172" y="168" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">25%</text>
+      <text x="292" y="168" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">50%</text>
+      <text x="412" y="168" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">75%</text>
+      <text x="532" y="168" text-anchor="middle" fill="#6b7280" font-size="9" font-family="monospace">100%</text>
+      <text x="295" y="178" text-anchor="middle" fill="#6b7280" font-size="8" font-family="sans-serif">opened_ratio (cells revealed / total cells)</text>
+      <!-- y_svg = 155 - multiplier * 137;  x_svg = 52 + ratio*484 -->
+      <!-- ratio=0   → mult=1.0 → y=155-137=18;   x=52 -->
+      <!-- ratio=0.25 → mult=0.5625 → y=155-77=78; x=172 -->
+      <!-- ratio=0.5  → mult=0.25 → y=155-34.25=120.75; x=292 -->
+      <!-- ratio=0.75 → mult=0.0625 → y=155-8.6=146.4; x=412 -->
+      <!-- ratio=1.0  → mult=0 → y=155; x=536 -->
+      <path d="M52,18 C172,18 172,78 292,121 C412,146 412,154 536,155" fill="none" stroke="#14b8a6" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M52,18 C172,18 172,78 292,121 C412,146 412,154 536,155" fill="url(#grad-eps)" opacity="0.15"/>
+      <defs>
+        <linearGradient id="grad-eps" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#14b8a6"/>
+          <stop offset="100%" stop-color="#14b8a6" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <!-- Annotation dots -->
+      <circle cx="52" cy="18" r="4" fill="#14b8a6"/>
+      <circle cx="172" cy="78" r="4" fill="#14b8a6"/>
+      <circle cx="292" cy="121" r="4" fill="#14b8a6"/>
+      <circle cx="412" cy="147" r="4" fill="#14b8a6"/>
+      <text x="58" y="16" fill="#a1aab8" font-size="8" font-family="monospace">×1.00</text>
+      <text x="178" y="76" fill="#a1aab8" font-size="8" font-family="monospace">×0.56</text>
+      <text x="298" y="119" fill="#a1aab8" font-size="8" font-family="monospace">×0.25</text>
+      <text x="418" y="145" fill="#a1aab8" font-size="8" font-family="monospace">×0.06</text>
+      <!-- Typical win position -->
+      <line x1="425" y1="18" x2="425" y2="155" stroke="#4b5563" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="430" y="30" fill="#6b7280" font-size="8" font-family="sans-serif">typical win</text>
+      <text x="430" y="40" fill="#6b7280" font-size="8" font-family="sans-serif">(≈78% revealed)</text>
+    </svg>
+  </div>
+</section>
+
+
+<!-- ════ EXPERIMENTS ════ -->
+<section class="section" id="experiments">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Experiments</p>
+      <h2>Quantitative results.</h2>
+    </div>
+    <p>All experiments: 20 000 training episodes, greedy evaluation over 1 000 test episodes, 3 random seeds (42/43/44). Conditional win rate excludes first-click mine deaths (~12.6%), which no algorithm can avoid.</p>
+  </div>
+
+  <div class="protocol-strip">
+    <div class="protocol-item">
+      <span class="protocol-key">Environment</span>
+      <span class="protocol-val">9×9 Classic Minesweeper · 10 mines · BFS cascade</span>
+    </div>
+    <div class="protocol-item">
+      <span class="protocol-key">Training / Eval</span>
+      <span class="protocol-val">20 000 train episodes · 1 000 greedy test episodes · 3 seeds</span>
+    </div>
+    <div class="protocol-item">
+      <span class="protocol-key">Shared Hyperparams</span>
+      <span class="protocol-val">α=0.01 · γ=0.99 · 10-dim features · linear Q(s,a)=w·φ</span>
+    </div>
+  </div>
+
+  <!-- Algorithm Comparison -->
+  <div class="table-wrap">
+    <div class="table-section-label">Algorithm Comparison — Decay ε strategy, λ=0.8 for SARSA</div>
+    <table>
+      <thead>
+        <tr><th>Algorithm</th><th>Win Rate</th><th>Conditional Win Rate</th><th>Avg Steps</th><th>Coverage</th><th>Time/ep (ms)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Random Baseline</td>
+          <td>0.00% ± 0.00</td>
+          <td>0.00%</td>
+          <td>4.6</td>
+          <td>—</td>
+          <td>—</td>
+        </tr>
+        <tr>
+          <td>Monte Carlo</td>
+          <td>55.60% ± 7.20</td>
+          <td>63.80% ± 7.77</td>
+          <td>12.1 ± 1.7</td>
+          <td>73.6% ± 4.0</td>
+          <td>8.28</td>
+        </tr>
+        <tr>
+          <td>Q-Learning</td>
+          <td class="hi">69.50% ± 0.28</td>
+          <td class="hi">79.46% ± 0.57</td>
+          <td>14.0 ± 0.1</td>
+          <td>78.3% ± 0.6</td>
+          <td>10.06</td>
+        </tr>
+        <tr>
+          <td>SARSA(λ=0.8)</td>
+          <td>66.47% ± 0.80</td>
+          <td>75.51% ± 1.42</td>
+          <td>14.1 ± 0.0</td>
+          <td>78.4% ± 1.1</td>
+          <td>11.85</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ε Ablation -->
+  <div class="table-wrap">
+    <div class="table-section-label">ε Strategy Ablation — SARSA(λ=0.8), 20k episodes × 3 seeds</div>
+    <table>
+      <thead>
+        <tr><th>Strategy</th><th>Win Rate</th><th>Conditional Win Rate</th><th>Avg Steps</th><th>Steps (Win)</th><th>Steps (Loss)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Fixed (ε=0.10, no decay)</td><td>56.33% ± 6.96</td><td>64.22% ± 7.79</td><td>12.4 ± 1.6</td><td>17.3 ± 0.8</td><td>6.0 ± 0.9</td></tr>
+        <tr><td>Decay (0.3→0.05, ×0.9995)</td><td>66.47% ± 0.80</td><td>75.51% ± 1.42</td><td>14.1 ± 0.0</td><td>18.3 ± 0.3</td><td>6.0 ± 0.3</td></tr>
+        <tr><td>Adaptive (base×(1−ratio)²)</td><td>67.27% ± 0.17</td><td>76.50% ± 0.61</td><td>14.2 ± 0.3</td><td>18.1 ± 0.3</td><td>6.1 ± 0.6</td></tr>
+        <tr>
+          <td class="hi">Decay + Adaptive (both)</td>
+          <td class="hi">69.43% ± 0.41</td>
+          <td class="hi">79.48% ± 0.32</td>
+          <td>14.0 ± 0.3</td>
+          <td>18.0 ± 0.1</td>
+          <td class="hi">4.9 ± 0.5</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- λ Ablation -->
+  <div class="table-wrap">
+    <div class="table-section-label">λ Ablation — SARSA, Decay+Adaptive ε, 20k × 3 seeds</div>
+    <table>
+      <thead>
+        <tr><th>λ</th><th>Win Rate</th><th>Conditional Win Rate</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>λ = 0.0 &nbsp;(single-step TD)</td><td>69.50% ± 0.29</td><td>79.37%</td><td>Essentially Q-Learning</td></tr>
+        <tr><td>λ = 0.4</td><td>68.93% ± 0.66</td><td>79.08%</td><td></td></tr>
+        <tr><td class="hi">λ = 0.8 &nbsp;(default)</td><td class="hi">69.43% ± 0.41</td><td class="hi">79.48%</td><td class="hi">Best stability + performance</td></tr>
+        <tr><td>λ = 1.0 &nbsp;(near Monte Carlo)</td><td>67.83% ± 1.45</td><td>77.39%</td><td>↑ variance at λ→1</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Difficulty Comparison -->
+  <div class="table-wrap">
+    <div class="table-section-label">Difficulty Comparison — Decay+Adaptive ε, SARSA(λ=0.8)</div>
+    <table>
+      <thead>
+        <tr><th>Difficulty</th><th>Win Rate</th><th>Conditional Win Rate</th><th>First-Click Death</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4×4 · 2 mines (Beginner)</td><td>76.00% ± 2.89</td><td>86.97% ± 2.46</td><td>12.6%</td></tr>
+        <tr><td>6×6 · 5 mines (Intermediate)</td><td>62.47% ± 0.93</td><td>72.45% ± 1.15</td><td>13.8%</td></tr>
+        <tr><td class="hi">9×9 · 10 mines (Classic)</td><td class="hi">69.43% ± 0.41</td><td class="hi">79.48% ± 0.32</td><td>12.6%</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ════ RESULTS IMAGES ════ -->
+<section class="section tinted" id="charts">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Training Curves &amp; Charts</p>
+      <h2>Visual results.</h2>
+    </div>
+    <p>Training curves show sliding win rate (window=500). Evaluation charts show greedy win rate (ε=0) over 1 000 test episodes across 3 seeds.</p>
+  </div>
+
+  <div class="img-grid">
+    <div class="img-card full">
+      <div class="img-card-head">
+        <p class="case-label" style="color:var(--accent-3)">Main Run</p>
+        <h3>Training summary — SARSA(λ=0.8), 9×9/10, 20 000 episodes</h3>
+      </div>
+      <img src="docs/assets/main_training_summary.png"
+           alt="Main training curve: win rate, reward, steps over 20k episodes"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label" style="color:var(--accent-3)">ε Strategy Ablation</p>
+        <h3>Training curves — Fixed / Decay / Adaptive / Decay+Adaptive</h3>
+      </div>
+      <img src="docs/assets/eps_training_curves.png"
+           alt="Epsilon strategy comparison training curves"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label" style="color:var(--accent-3)">ε Strategy Ablation</p>
+        <h3>Final greedy win rate — 4 exploration strategies</h3>
+      </div>
+      <img src="docs/assets/eps_final_win_rate.png"
+           alt="Epsilon strategy final win rate comparison"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label" style="color:var(--accent-2)">Algorithm Comparison</p>
+        <h3>Training curves — SARSA / Q-Learning / Monte Carlo</h3>
+      </div>
+      <img src="docs/assets/algo_training_curves.png"
+           alt="Algorithm comparison training curves"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label" style="color:var(--accent-2)">Algorithm Comparison</p>
+        <h3>Final greedy win rate — SARSA / Q-Learning / Monte Carlo</h3>
+      </div>
+      <img src="docs/assets/algo_final_win_rate.png"
+           alt="Algorithm comparison final win rate"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label">λ Ablation</p>
+        <h3>Training curves — λ ∈ {0.0, 0.4, 0.8, 1.0}</h3>
+      </div>
+      <img src="docs/assets/lambda_training_curves.png"
+           alt="Lambda ablation training curves"
+           loading="lazy">
+    </div>
+
+    <div class="img-card">
+      <div class="img-card-head">
+        <p class="case-label">Difficulty</p>
+        <h3>Training curves — 4×4 / 6×6 / 9×9</h3>
+      </div>
+      <img src="docs/assets/difficulty_final_win_rate.png"
+           alt="Difficulty comparison final win rate"
+           loading="lazy">
+    </div>
+  </div>
+</section>
+
+
+<!-- ════ TEAM ════ -->
+<section class="section" id="team">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Team</p>
+      <h2>Built by.</h2>
+    </div>
+  </div>
+  <div class="team-grid">
+    <div class="contributor-card">
+      <div class="contributor-avatar" style="background:rgba(20,184,166,.15);color:var(--accent);">FF</div>
+      <div>
+        <div class="contributor-name">Fu Fangteng</div>
+        <div class="contributor-role">Environment · GUI · Algorithm</div>
+      </div>
+    </div>
+    <div class="contributor-card">
+      <div class="contributor-avatar" style="background:rgba(139,92,246,.15);color:var(--accent-2);">JL</div>
+      <div>
+        <div class="contributor-name">Jiaqi Li</div>
+        <div class="contributor-role">Training &amp; Evaluation · Algorithm</div>
+      </div>
+    </div>
+    <div class="contributor-card">
+      <div class="contributor-avatar" style="background:rgba(245,158,11,.15);color:var(--accent-3);">YT</div>
+      <div>
+        <div class="contributor-name">Yenchi Tseng</div>
+        <div class="contributor-role">Feature Design · Experiments · Algorithm</div>
+      </div>
+    </div>
+  </div>
+  <p style="text-align:center;margin-top:28px;color:var(--text-3);font-size:.82rem;">
+    Reinforcement Learning Course · Spring 2025–26
+  </p>
+</section>
+
+
+<!-- ════ FOOTER ════ -->
+<footer class="site-footer">
+  <span class="footer-text">Minesweeper RL · SARSA(λ) + Dual Exploration · Spring 2025–26</span>
+  <div class="footer-links">
+    <a href="docs/RL_paper.pdf" target="_blank">Paper</a>
+    <a href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+
+<!-- ════ SCRIPTS ════ -->
+<script>
+/* ── 1. Particle canvas ── */
+(function initParticles() {
+  const canvas = document.getElementById("particle-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  let W, H, particles = [];
+  function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+  class Particle {
+    constructor() { this.reset(); }
+    reset() {
+      this.x = Math.random()*W; this.y = Math.random()*H;
+      this.r = Math.random()*1.1+0.3;
+      this.vx = (Math.random()-.5)*.14; this.vy = (Math.random()-.5)*.14;
+      this.a = Math.random()*.4+.06;
+    }
+    update() { this.x+=this.vx; this.y+=this.vy; if(this.x<0||this.x>W||this.y<0||this.y>H) this.reset(); }
+    draw() { ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fillStyle=`rgba(20,184,166,${this.a})`; ctx.fill(); }
+  }
+  function init(){ resize(); particles=Array.from({length:70},()=>new Particle()); }
+  function frame(){ ctx.clearRect(0,0,W,H); particles.forEach(p=>{p.update();p.draw();}); requestAnimationFrame(frame); }
+  addEventListener("resize",resize); init(); frame();
+})();
+
+
+/* ── 2. Hero: animated minesweeper canvas ── */
+(function initGameCanvas() {
+  const canvas = document.getElementById("game-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+
+  const ROWS = 9, COLS = 9;
+  // Mine positions (index = r*9+c)
+  const MINE_POS = [[0,1],[0,7],[1,5],[2,2],[2,8],[4,0],[5,7],[6,3],[7,6],[8,1]];
+  const mineSet = new Set(MINE_POS.map(([r,c])=>r*9+c));
+
+  // Compute number map
+  const numMap = new Array(81).fill(0);
+  for (let r=0;r<9;r++) for (let c=0;c<9;c++) {
+    if (mineSet.has(r*9+c)) { numMap[r*9+c]=-1; continue; }
+    let cnt=0;
+    for (let dr=-1;dr<=1;dr++) for (let dc=-1;dc<=1;dc++) {
+      if(!dr&&!dc) continue;
+      const nr=r+dr,nc=c+dc;
+      if(nr>=0&&nr<9&&nc>=0&&nc<9&&mineSet.has(nr*9+nc)) cnt++;
+    }
+    numMap[r*9+c]=cnt;
+  }
+
+  // State
+  let visible = new Array(81).fill(false);
+  let cursor = null; // {r,c,alpha}
+  let phase = 'wait'; // wait | aim | reveal | win | reset
+  let moveQueue = [];
+  let revealList = []; // cells to reveal with animation
+  let revealIdx = 0;
+  let phaseTimer = 0;
+  let winFlash = 0;
+
+  // BFS reveal
+  function bfsReveal(startR, startC) {
+    const cells = [];
+    const queue = [[startR,startC]];
+    const seen = new Set([startR*9+startC]);
+    while (queue.length) {
+      const [r,c] = queue.shift();
+      cells.push([r,c]);
+      if (numMap[r*9+c]===0) {
+        for (let dr=-1;dr<=1;dr++) for (let dc=-1;dc<=1;dc++) {
+          if(!dr&&!dc) continue;
+          const nr=r+dr,nc=c+dc,k=nr*9+nc;
+          if(nr>=0&&nr<9&&nc>=0&&nc<9&&!seen.has(k)&&!mineSet.has(k)&&!visible[k]) {
+            seen.add(k); queue.push([nr,nc]);
+          }
+        }
+      }
+    }
+    return cells;
+  }
+
+  // Simple AI: pick safest hidden cell
+  function pickAction() {
+    const hidden = [];
+    for(let r=0;r<9;r++) for(let c=0;c<9;c++) {
+      if(!visible[r*9+c]&&!mineSet.has(r*9+c)) hidden.push([r,c]);
+    }
+    if(!hidden.length) return null;
+    // Score: pick cell with most revealed neighbors (near information)
+    let best=null, bestScore=-1;
+    for(const [r,c] of hidden) {
+      let revN=0;
+      for(let dr=-1;dr<=1;dr++) for(let dc=-1;dc<=1;dc++) {
+        const nr=r+dr,nc=c+dc;
+        if(nr>=0&&nr<9&&nc>=0&&nc<9&&visible[nr*9+nc]) revN++;
+      }
+      if(revN>bestScore||(revN===bestScore&&Math.random()>.5)){bestScore=revN;best=[r,c];}
+    }
+    return best;
+  }
+
+  function checkWin(){
+    for(let i=0;i<81;i++) if(!mineSet.has(i)&&!visible[i]) return false;
+    return true;
+  }
+
+  function resetBoard(){
+    visible=new Array(81).fill(false);
+    cursor=null; phase='wait'; phaseTimer=60; revealList=[]; revealIdx=0; winFlash=0;
+    // Start with center click
+    moveQueue=[[4,4]];
+  }
+
+  // Number colors (classic minesweeper)
+  const numColors=['','#3b82f6','#22c55e','#ef4444','#1e3a8a','#7f1d1d','#0891b2','#111','#6b7280'];
+
+  function draw() {
+    const W=canvas.width, H=canvas.height;
+    ctx.clearRect(0,0,W,H);
+
+    const cellW = Math.min(W,H)/10.5;
+    const offX = (W - COLS*cellW)/2;
+    const offY = (H - ROWS*cellW)/2;
+    const cs = cellW;
+
+    // Draw cells
+    for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++) {
+      const x=offX+c*cs, y=offY+r*cs, idx=r*9+c;
+      const isVis=visible[idx];
+
+      ctx.beginPath();
+      ctx.roundRect(x+1,y+1,cs-2,cs-2,3);
+
+      if(isVis) {
+        const n=numMap[idx];
+        if(n===-1) {
+          ctx.fillStyle='rgba(239,68,68,0.3)'; ctx.fill();
+          ctx.font=`bold ${cs*.55}px sans-serif`;
+          ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.fillStyle='#ef4444';
+          ctx.fillText('💥',x+cs/2,y+cs/2);
+        } else if(n===0) {
+          ctx.fillStyle='rgba(20,184,166,0.08)'; ctx.fill();
+        } else {
+          ctx.fillStyle='rgba(20,184,166,0.12)'; ctx.fill();
+          ctx.font=`bold ${cs*.5}px sans-serif`;
+          ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.fillStyle=numColors[n]||'#e8ecf2';
+          ctx.fillText(n,x+cs/2,y+cs/2);
+        }
+        ctx.strokeStyle='rgba(20,184,166,0.08)'; ctx.lineWidth=0.5; ctx.stroke();
+      } else {
+        // Check if this is cursor target
+        const isCursor = cursor && cursor.r===r && cursor.c===c;
+        if(isCursor) {
+          const glow = ctx.createRadialGradient(x+cs/2,y+cs/2,0,x+cs/2,y+cs/2,cs*.8);
+          glow.addColorStop(0,`rgba(20,184,166,${0.35*cursor.alpha})`);
+          glow.addColorStop(1,`rgba(20,184,166,0)`);
+          ctx.fillStyle=glow; ctx.fill();
+          ctx.fillStyle=`rgba(30,50,70,${0.85+0.1*cursor.alpha})`; ctx.fill();
+          ctx.strokeStyle=`rgba(20,184,166,${0.9*cursor.alpha})`; ctx.lineWidth=1.5; ctx.stroke();
+        } else {
+          ctx.fillStyle='rgba(15,25,40,0.7)'; ctx.fill();
+          ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=0.5; ctx.stroke();
+        }
+        // Dot
+        if(!isCursor){
+          ctx.beginPath();
+          ctx.arc(x+cs/2,y+cs/2,cs*.06,0,Math.PI*2);
+          ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fill();
+        }
+      }
+
+      // Win flash
+      if(winFlash>0 && !mineSet.has(idx)) {
+        ctx.beginPath();
+        ctx.roundRect(x+1,y+1,cs-2,cs-2,3);
+        ctx.fillStyle=`rgba(20,184,166,${winFlash*.25})`; ctx.fill();
+      }
+    }
+  }
+
+  // Animation state machine
+  let frame=0;
+  function tick(){
+    frame++;
+    const W=canvas.width=canvas.offsetWidth, H=canvas.height=canvas.offsetHeight;
+
+    if(phase==='wait') {
+      phaseTimer--;
+      if(phaseTimer<=0) {
+        if(moveQueue.length>0) {
+          const [r,c]=moveQueue.shift();
+          cursor={r,c,alpha:0};
+          phase='aim';
+          phaseTimer=30;
+        } else {
+          const a=pickAction();
+          if(a){cursor={r:a[0],c:a[1],alpha:0};phase='aim';phaseTimer=30;}
+          else{phase='win';winFlash=1.0;}
+        }
+      }
+    } else if(phase==='aim') {
+      cursor.alpha=Math.min(1,cursor.alpha+0.07);
+      phaseTimer--;
+      if(phaseTimer<=0&&cursor.alpha>=0.95){
+        // Reveal
+        const cells=bfsReveal(cursor.r,cursor.c);
+        cells.forEach(([r,c])=>visible[r*9+c]=true);
+        revealList=cells; revealIdx=0;
+        cursor=null; phase='reveal'; phaseTimer=Math.max(20,cells.length*3);
+      }
+    } else if(phase==='reveal') {
+      phaseTimer--;
+      if(phaseTimer<=0){
+        if(checkWin()){phase='win';winFlash=1.5;}
+        else{phase='wait';phaseTimer=40;}
+      }
+    } else if(phase==='win') {
+      winFlash-=0.015;
+      if(winFlash<=0){phase='reset';phaseTimer=30;}
+    } else if(phase==='reset') {
+      phaseTimer--;
+      if(phaseTimer<=0) resetBoard();
+    }
+
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  resetBoard();
+  tick();
+})();
+
+
+/* ── 3. Active nav on scroll ── */
+(function initScrollSpy() {
+  const links=[...document.querySelectorAll(".site-header nav a[href^='#']")];
+  const targets=links.map(a=>document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  targets.forEach(t=>new IntersectionObserver(entries=>{
+    if(entries[0].isIntersecting)
+      links.forEach(a=>a.classList.toggle("active",a.getAttribute("href")==="#"+t.id));
+  },{rootMargin:"-28% 0px -62% 0px"}).observe(t));
+})();
+</script>
+
+</body>
+</html>
